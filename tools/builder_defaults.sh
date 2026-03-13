@@ -131,9 +131,10 @@ case "${FREEBSD_REPO_BASE}" in
 esac
 
 # Leave this alone.
-export SRCCONF=${SRCCONF:-"${FREEBSD_SRC_DIR}/release/conf/${PRODUCT_NAME}_src.conf"}
-export SRC_ENV_CONF=${SRC_CONF:-"${FREEBSD_SRC_DIR}/release/conf/${PRODUCT_NAME}_src-env.conf"}
-export __MAKE_CONF=${__MAKE_CONF:-"${FREEBSD_SRC_DIR}/release/conf/${PRODUCT_NAME}_make.conf"}
+export SRCCONF=${SRCCONF:-"${FREEBSD_SRC_DIR}/release/conf/pfSense_src.conf"}
+
+export SRC_ENV_CONF=${SRC_CONF:-"${FREEBSD_SRC_DIR}/release/conf/pfSense_src-env.conf"}
+export __MAKE_CONF=${__MAKE_CONF:-"${FREEBSD_SRC_DIR}/release/conf/pfSense_make.conf"}
 
 # Extra tools to be added to ITOOLS
 export LOCAL_ITOOLS=${LOCAL_ITOOLS:-"uuencode uudecode ex"}
@@ -146,7 +147,7 @@ export MAKEOBJDIRPREFIX=${MAKEOBJDIRPREFIX:-"${SCRATCHDIR}/obj"}
 
 if [ -z "${MODULES_OVERRIDE}" ]; then
 	export MODULES_OVERRIDE_base="cc/cc_cdg cc/cc_chd cc/cc_cubic cc/cc_dctcp cc/cc_hd cc/cc_htcp cc/cc_vegas cryptodev dummynet fdescfs hwpmc i2c if_stf ipdivert ipfw ipfw_nat64 opensolaris usb/cdce usb/ipheth usb/ure usb/urndis zfs"
-	export MODULES_OVERRIDE_amd64="${MODULES_OVERRIDE_base} aesni amdsmn amdtemp blake2 coretemp cpuctl cxgbe/tom drm2 ipmi ix ixv ndis nmdm qlnx sfxge vmm"
+	export MODULES_OVERRIDE_amd64="${MODULES_OVERRIDE_base} aesni amdsmn amdtemp blake2 coretemp cpuctl cxgbe/tom ipmi ix ixv nmdm qlnx sfxge vmm"
 	export MODULES_OVERRIDE="${MODULES_OVERRIDE_amd64}"
 fi
 
@@ -231,7 +232,7 @@ export POUDRIERE_PORTS_GIT_BRANCH=${POUDRIERE_PORTS_GIT_BRANCH:-"${REPO_BRANCH_P
 # Use vX_Y instead of RELENG_X_Y for poudriere to make it shorter
 POUDRIERE_PORTS_BRANCH=$(echo "${POUDRIERE_PORTS_GIT_BRANCH}" | sed 's,RELENG_,v,; s,-,_,g')
 
-export POUDRIERE_PORTS_NAME=${POUDRIERE_PORTS_NAME:-"${PRODUCT_NAME}_${POUDRIERE_PORTS_BRANCH}"}
+export POUDRIERE_PORTS_NAME="JACOSShield_v2_7_2"
 
 # XXX: Poudriere doesn't like ssh short form
 case "${POUDRIERE_PORTS_GIT_URL}" in
@@ -309,7 +310,7 @@ else
 	export PKG_REPO_SIGN_KEY=${PKG_REPO_SIGN_KEY:-"beta${PRODUCT_NAME_SUFFIX}"}
 fi
 # Command used to sign pkg repo
-: ${PKG_REPO_SIGNING_COMMAND="ssh -o StrictHostKeyChecking=no sign@codesigner.netgate.com sudo ./sign.sh ${PKG_REPO_SIGN_KEY}"}
+: ${PKG_REPO_SIGNING_COMMAND="/root/sign/sign.sh"}
 export PKG_REPO_SIGNING_COMMAND
 export DO_NOT_SIGN_PKG_REPO=${DO_NOT_SIGN_PKG_REPO:-}
 

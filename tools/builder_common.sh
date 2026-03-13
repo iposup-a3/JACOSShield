@@ -58,6 +58,8 @@ core_pkg_create_repo() {
 	#
 	echo -n ">>> Creating core packages repository... "
 	if pkg repo -q "${CORE_PKG_REAL_PATH}/"; then
+	# Sync core pkg to nginx webroot for package install step
+	mkdir -p /usr/local/www/nginx/packages/${PRODUCT_NAME}_${PRODUCT_VERSION%%.*.*}-core/All 2>/dev/null || true
 		echo "Done!"
 	else
 		echo "Failed!"
@@ -162,7 +164,7 @@ build_all_kernels() {
 		LOGFILE="${BUILDER_LOGS}/kernel.${KERNCONF}.${TARGET}.log"
 		echo ">>> Building $BUILD_KERNEL kernel."  | tee -a ${LOGFILE}
 
-		if [ -n "${NO_BUILDKERNEL}" -a -f "${CORE_PKG_ALL_PATH}/$(get_pkg_name kernel-${KERNEL_NAME}).txz" ]; then
+		if [ -n "${NO_BUILDKERNEL}" -a -f "${CORE_PKG_ALL_PATH}/$(get_pkg_name kernel-${KERNEL_NAME}).pkg" ]; then
 			echo ">>> NO_BUILDKERNEL set, skipping build" | tee -a ${LOGFILE}
 			continue
 		fi
@@ -198,7 +200,7 @@ install_default_kernel() {
 
 	# Copy kernel package to chroot, otherwise pkg won't find it to install
 	if ! pkg_chroot_add ${FINAL_CHROOT_DIR} kernel-${KERNEL_NAME}; then
-		echo ">>> ERROR: Error installing kernel package $(get_pkg_name kernel-${KERNEL_NAME}).txz" | tee -a ${LOGFILE}
+		echo ">>> ERROR: Error installing kernel package $(get_pkg_name kernel-${KERNEL_NAME}).pkg" | tee -a ${LOGFILE}
 		print_error_pfS
 	fi
 
@@ -211,15 +213,15 @@ install_default_kernel() {
 	fi
 	mkdir -p $FINAL_CHROOT_DIR/pkgs
 	if [ -z "${2}" -o -n "${INSTALL_EXTRA_KERNELS}" ]; then
-		cp ${CORE_PKG_ALL_PATH}/$(get_pkg_name kernel-${KERNEL_NAME}).txz $FINAL_CHROOT_DIR/pkgs
+		cp ${CORE_PKG_ALL_PATH}/$(get_pkg_name kernel-${KERNEL_NAME}).pkg $FINAL_CHROOT_DIR/pkgs
 		if [ -n "${INSTALL_EXTRA_KERNELS}" ]; then
 			for _EXTRA_KERNEL in $INSTALL_EXTRA_KERNELS; do
-				_EXTRA_KERNEL_PATH=${CORE_PKG_ALL_PATH}/$(get_pkg_name kernel-${_EXTRA_KERNEL}).txz
+				_EXTRA_KERNEL_PATH=${CORE_PKG_ALL_PATH}/$(get_pkg_name kernel-${_EXTRA_KERNEL}).pkg
 				if [ -f "${_EXTRA_KERNEL_PATH}" ]; then
 					echo -n ". adding ${_EXTRA_KERNEL_PATH} on image /pkgs folder"
 					cp ${_EXTRA_KERNEL_PATH} $FINAL_CHROOT_DIR/pkgs
 				else
-					echo ">>> ERROR: Requested kernel $(get_pkg_name kernel-${_EXTRA_KERNEL}).txz was not found to be put on image /pkgs folder!"
+					echo ">>> ERROR: Requested kernel $(get_pkg_name kernel-${_EXTRA_KERNEL}).pkg was not found to be put on image /pkgs folder!"
 					print_error_pfS
 				fi
 			done
@@ -235,15 +237,14 @@ install_default_kernel() {
 make_world() {
 	LOGFILE=${BUILDER_LOGS}/buildworld.${TARGET}
 	echo ">>> LOGFILE set to $LOGFILE." | tee -a ${LOGFILE}
-	if [ -n "${NO_BUILDWORLD}" ]; then
-		echo ">>> NO_BUILDWORLD set, skipping build" | tee -a ${LOGFILE}
-		return
-	fi
-
-	echo ">>> $(LC_ALL=C date) - Starting build world for ${TARGET} architecture..." | tee -a ${LOGFILE}
-	script -aq $LOGFILE ${BUILDER_SCRIPTS}/build_freebsd.sh -K -s ${FREEBSD_SRC_DIR} \
-		|| print_error_pfS
-	echo ">>> $(LC_ALL=C date) - Finished build world for ${TARGET} architecture..." | tee -a ${LOGFILE}
+if [ -z "${NO_BUILDWORLD}" ]; then
+echo ">>> $(LC_ALL=C date) - Starting build world for ${TARGET} architecture..." | tee -a ${LOGFILE}
+script -aq $LOGFILE ${BUILDER_SCRIPTS}/build_freebsd.sh -K -s ${FREEBSD_SRC_DIR} \
+|| print_error_pfS
+echo ">>> $(LC_ALL=C date) - Finished build world for ${TARGET} architecture..." | tee -a ${LOGFILE}
+else
+echo ">>> NO_BUILDWORLD set, skipping buildworld" | tee -a ${LOGFILE}
+fi
 
 	LOGFILE=${BUILDER_LOGS}/installworld.${TARGET}
 	echo ">>> LOGFILE set to $LOGFILE." | tee -a ${LOGFILE}
@@ -280,7 +281,7 @@ make_world() {
 		|| mkdir -p ${STAGE_CHROOT_DIR}/usr/local/bin
 	makeargs="CC=${BUILD_CC} DESTDIR=${STAGE_CHROOT_DIR}"
 	echo ">>> Building and installing crypto tools and athstats for ${TARGET} architecture... (Starting - $(LC_ALL=C date))" | tee -a ${LOGFILE}
-	(script -aq $LOGFILE make -C ${FREEBSD_SRC_DIR}/tools/tools/crypto ${makeargs} clean all install || print_error_pfS;) | egrep '^>>>' | tee -a ${LOGFILE}
+	#DISABLED-crypto-tools
 	# XXX FIX IT
 #	(script -aq $LOGFILE make -C ${FREEBSD_SRC_DIR}/tools/tools/ath/athstats ${makeargs} clean all install || print_error_pfS;) | egrep '^>>>' | tee -a ${LOGFILE}
 	echo ">>> Building and installing crypto tools and athstats for ${TARGET} architecture... (Finished - $(LC_ALL=C date))" | tee -a ${LOGFILE}
@@ -622,8 +623,24 @@ clone_to_staging_area() {
 		-X ${_exclude_files} \
 		.
 
+	# Create initial.txz from DH parameter files
+	tar \
+		-C ${STAGE_CHROOT_DIR} \
+		-cJf ${STAGE_CHROOT_DIR}${PRODUCT_SHARE_DIR}/initial.txz \
+		etc/dh-parameters.1024 \
+		etc/dh-parameters.2048 \
+		etc/dh-parameters.3072 \
+		etc/dh-parameters.4096 \
+		etc/dh-parameters.6144 \
+		etc/dh-parameters.8192
 	core_pkg_create rc "" ${CORE_PKG_VERSION} ${STAGE_CHROOT_DIR}
 	core_pkg_create base "" ${CORE_PKG_VERSION} ${STAGE_CHROOT_DIR}
+	# Create conf.default/config.xml for default-config package
+	mkdir -p ${STAGE_CHROOT_DIR}/conf.default
+	if [ ! -f ${STAGE_CHROOT_DIR}/conf.default/config.xml ]; then
+		cp /root/pfsense/src/conf.default/config.xml \
+			${STAGE_CHROOT_DIR}/conf.default/config.xml 2>/dev/null || true
+	fi
 	core_pkg_create default-config "" ${CORE_PKG_VERSION} ${STAGE_CHROOT_DIR}
 
 	local DEFAULTCONF=${STAGE_CHROOT_DIR}/conf.default/config.xml
@@ -648,6 +665,7 @@ clone_to_staging_area() {
 	xml fo -t ${DEFAULTCONF}.tmp > ${DEFAULTCONF}
 	rm -f ${DEFAULTCONF}.tmp
 
+	mkdir -p ${STAGE_CHROOT_DIR}/cf/conf
 	echo force > ${STAGE_CHROOT_DIR}/cf/conf/enableserial_force
 
 	core_pkg_create default-config-serial "" ${CORE_PKG_VERSION} ${STAGE_CHROOT_DIR}
@@ -657,6 +675,10 @@ clone_to_staging_area() {
 	rm -f ${STAGE_CHROOT_DIR}/cf/conf/config.xml
 
 	# Make sure pkg is present
+	# JACOS: installworld before pkg_bootstrap
+	export MAKEOBJDIRPREFIX=/root/pfsense/tmp/obj
+	make -C ${FREEBSD_SRC_DIR} TARGET=${TARGET} TARGET_ARCH=${TARGET_ARCH} DESTDIR=${STAGE_CHROOT_DIR} WITHOUT_BSDINSTALL=yes -j4 installworld 2>&1 | tail -3
+
 	pkg_bootstrap ${STAGE_CHROOT_DIR}
 
 	# Make sure correct repo is available on tmp dir
@@ -726,7 +748,7 @@ customize_stagearea_for_image() {
 	     "${_image_type}" = "memstickserial" -o \
 	     "${_image_type}" = "memstickadi" ]; then
 		mkdir -p ${FINAL_CHROOT_DIR}/pkgs
-		cp ${CORE_PKG_ALL_PATH}/*default-config*.txz ${FINAL_CHROOT_DIR}/pkgs
+		cp ${CORE_PKG_ALL_PATH}/*default-config*.pkg ${FINAL_CHROOT_DIR}/pkgs
 	fi
 
 	pkg_chroot_add ${FINAL_CHROOT_DIR} ${_default_config}
@@ -1009,7 +1031,7 @@ setup_pkg_repo() {
 	local _staging="${5}"
 	local _pkg_conf="${6}"
 	local _mirror_type="srv"
-	local _signature_type="fingerprints"
+	local _signature_type="none"
 
 	if [ -z "${_template}" -o ! -f "${_template}" ]; then
 		echo ">>> ERROR: It was not possible to find pkg conf template ${_template}"
@@ -1039,6 +1061,8 @@ setup_pkg_repo() {
 		-e "s,%%PKG_REPO_SERVER_RELEASE%%,${_pkg_repo_server_release},g" \
 		-e "s,%%POUDRIERE_PORTS_NAME%%,${POUDRIERE_PORTS_NAME},g" \
 		-e "s/%%PRODUCT_NAME%%/${PRODUCT_NAME}/g" \
+		-e "s/%%OSVERSION%%/${PRODUCT_VERSION%%.*.*}_${PRODUCT_VERSION#*.*.}/g" \
+		-e "s/%%VERSION%%/${PRODUCT_VERSION%%.*.*}_${PRODUCT_VERSION#*.*.}/g" \
 		-e "s/%%REPO_BRANCH_PREFIX%%/${REPO_PATH_PREFIX}/g" \
 		-e "s/%%SIGNATURE_TYPE%%/${_signature_type}/" \
 		${_template} \
@@ -1123,6 +1147,9 @@ update_freebsd_sources() {
 		print_error_pfS
 	fi
 
+	# Copy JACOSShield kernel configs after clone
+	cp /root/freebsd-src/sys/amd64/conf/JACOSShield ${FREEBSD_SRC_DIR}/sys/amd64/conf/JACOSShield 2>/dev/null || true
+	cp /root/freebsd-src/sys/amd64/conf/JACOSShield-DEBUG ${FREEBSD_SRC_DIR}/sys/amd64/conf/JACOSShield-DEBUG 2>/dev/null || true
 	if [ -n "${GIT_FREEBSD_COSHA1}" ]; then
 		echo -n ">>> Checking out desired commit (${GIT_FREEBSD_COSHA1})... "
 		( git -C  ${FREEBSD_SRC_DIR} checkout ${GIT_FREEBSD_COSHA1} ) 2>&1 | \
@@ -1184,7 +1211,7 @@ pkg_chroot_add() {
 	fi
 
 	local _target="${1}"
-	local _pkg="$(get_pkg_name ${2}).txz"
+	local _pkg="$(get_pkg_name ${2}).pkg"
 
 	if [ ! -d "${_target}" ]; then
 		echo ">>> ERROR: Target dir ${_target} not found"
@@ -1221,7 +1248,7 @@ install_pkg_install_ports() {
 	local MAIN_PKG="${1}"
 
 	if [ -z "${MAIN_PKG}" ]; then
-		MAIN_PKG=${PRODUCT_NAME}
+		MAIN_PKG=${PRODUCT_NAME}-ce
 	fi
 
 	echo ">>> Installing pkg repository in chroot (${STAGE_CHROOT_DIR})..."
@@ -1387,7 +1414,7 @@ pkg_repo_rsync() {
 				echo "Done!" | tee -a ${_logfile}
 			else
 				echo "Failed!" | tee -a ${_logfile}
-				echo ">>> ERROR: An error occurred trying to sign Latest/pkg.txz"
+				echo ">>> ERROR: An error occurred trying to sign Latest/pkg.pkg"
 				print_error_pfS
 			fi
 		fi
